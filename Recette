@@ -1,0 +1,173 @@
+import tkinter as tk
+from tkinter import messagebox, filedialog
+from tkinter import simpledialog
+from PIL import Image, ImageTk
+import json
+from fpdf import FPDF
+import os
+
+FICHIER_RECETTES = "recettes.json"
+
+# --- Gestion des recettes ---
+def charger_recettes():
+    if os.path.exists(FICHIER_RECETTES):
+        with open(FICHIER_RECETTES, "r") as f:
+            return json.load(f)
+    return []
+
+def sauvegarder_recettes(recettes):
+    with open(FICHIER_RECETTES, "w") as f:
+        json.dump(recettes, f, indent=4)
+
+def actualiser_liste():
+    liste_recettes.delete(0, tk.END)
+    for r in charger_recettes():
+        liste_recettes.insert(tk.END, r["nom"])
+
+def afficher_details(event):
+    selection = liste_recettes.curselection()
+    if not selection:
+        return
+    index = selection[0]
+    recette = charger_recettes()[index]
+    texte_details.config(state=tk.NORMAL)
+    texte_details.delete("1.0", tk.END)
+    texte_details.insert(tk.END, f"Nom: {recette['nom']}\n")
+    texte_details.insert(tk.END, f"Catégorie: {recette['categorie']}\n")
+    texte_details.insert(tk.END, f"Temps: {recette['temps']}\n")
+    texte_details.insert(tk.END, f"Ingrédients: {', '.join(recette['ingredients'])}\n")
+    texte_details.insert(tk.END, f"Instructions:\n{recette['instructions']}\n")
+    texte_details.config(state=tk.DISABLED)
+
+    # Affichage de l'image si elle existe
+    if "image" in recette and recette["image"] and os.path.exists(recette["image"]):
+        img = Image.open(recette["image"])
+        img.thumbnail((250, 250))
+        img_tk = ImageTk.PhotoImage(img)
+        label_image.config(image=img_tk)
+        label_image.image = img_tk
+    else:
+        label_image.config(image="")
+        label_image.image = None
+
+# --- Ajouter une recette ---
+def ajouter_recette():
+    fenetre = tk.Toplevel(root)
+    fenetre.title("Ajouter/Modifier une recette")
+    fenetre.geometry("400x500")
+    
+    labels = ["Nom", "Catégorie", "Temps", "Ingrédients", "Instructions"]
+    entries = {}
+
+    for text in labels:
+        tk.Label(fenetre, text=text).pack()
+        entry = tk.Text(fenetre, height=2 if text != "Instructions" else 5, width=40)
+        entry.pack(pady=5)
+        entries[text] = entry
+
+    image_path = tk.StringVar()
+    def choisir_image():
+        path = filedialog.askopenfilename(filetypes=[("Image files", "*.jpg *.png *.jpeg")])
+        if path:
+            image_path.set(path)
+    
+    tk.Button(fenetre, text="Ajouter une image", command=choisir_image, bg="#4CAF50", fg="white").pack(pady=5)
+
+    def enregistrer():
+        nom = entries["Nom"].get("1.0", tk.END).strip()
+        if not nom:
+            messagebox.showwarning("Erreur", "Le nom est obligatoire")
+            return
+        recette = {
+            "nom": nom,
+            "categorie": entries["Catégorie"].get("1.0", tk.END).strip(),
+            "temps": entries["Temps"].get("1.0", tk.END).strip(),
+            "ingredients": [i.strip() for i in entries["Ingrédients"].get("1.0", tk.END).split(',')],
+            "instructions": entries["Instructions"].get("1.0", tk.END).strip(),
+            "image": image_path.get()
+        }
+        recettes = charger_recettes()
+        recettes.append(recette)
+        sauvegarder_recettes(recettes)
+        messagebox.showinfo("Succès", "Recette enregistrée !")
+        fenetre.destroy()
+        actualiser_liste()
+
+    tk.Button(fenetre, text="Enregistrer", command=enregistrer, bg="#2196F3", fg="white").pack(pady=10)
+
+# --- Supprimer une recette ---
+def supprimer_recette():
+    selection = liste_recettes.curselection()
+    if not selection:
+        messagebox.showwarning("Attention", "Sélectionnez une recette")
+        return
+    index = selection[0]
+    recettes = charger_recettes()
+    recette_suppr = recettes.pop(index)
+    sauvegarder_recettes(recettes)
+    messagebox.showinfo("Supprimé", f"Recette '{recette_suppr['nom']}' supprimée !")
+    actualiser_liste()
+    texte_details.config(state=tk.NORMAL)
+    texte_details.delete("1.0", tk.END)
+    texte_details.config(state=tk.DISABLED)
+    label_image.config(image="")
+    label_image.image = None
+
+# --- Export PDF ---
+def exporter_pdf():
+    recettes = charger_recettes()
+    if not recettes:
+        messagebox.showwarning("Attention", "Aucune recette à exporter.")
+        return
+    nom_fichier = filedialog.asksaveasfilename(defaultextension=".pdf",
+                                               filetypes=[("PDF files", "*.pdf")])
+    if not nom_fichier:
+        return
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Mes Recettes de Cuisine", ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", "", 12)
+    for r in recettes:
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, r['nom'], ln=True)
+        pdf.set_font("Arial", "", 12)
+        pdf.cell(0, 8, f"Catégorie: {r['categorie']} | Temps: {r['temps']}", ln=True)
+        pdf.cell(0, 8, "Ingrédients: " + ", ".join(r['ingredients']), ln=True)
+        pdf.multi_cell(0, 8, "Instructions: " + r['instructions'])
+        pdf.ln(5)
+    pdf.output(nom_fichier)
+    messagebox.showinfo("Succès", f"Recettes exportées en PDF : {nom_fichier}")
+
+# --- Interface principale ---
+root = tk.Tk()
+root.title("Mes Recettes Stylisées")
+root.geometry("900x600")
+
+# Cadre gauche : liste et boutons
+frame_gauche = tk.Frame(root, bg="#f0f0f0", width=250)
+frame_gauche.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
+
+tk.Label(frame_gauche, text="Recettes", bg="#f0f0f0", font=("Arial", 14, "bold")).pack(pady=5)
+liste_recettes = tk.Listbox(frame_gauche, width=30, height=25)
+liste_recettes.pack(pady=5)
+liste_recettes.bind("<<ListboxSelect>>", afficher_details)
+
+tk.Button(frame_gauche, text="Ajouter", command=ajouter_recette, bg="#4CAF50", fg="white").pack(fill=tk.X, pady=5)
+tk.Button(frame_gauche, text="Supprimer", command=supprimer_recette, bg="#f44336", fg="white").pack(fill=tk.X, pady=5)
+tk.Button(frame_gauche, text="Exporter PDF", command=exporter_pdf, bg="#2196F3", fg="white").pack(fill=tk.X, pady=5)
+
+# Cadre droit : détails et image
+frame_droite = tk.Frame(root)
+frame_droite.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+texte_details = tk.Text(frame_droite, wrap=tk.WORD, state=tk.DISABLED)
+texte_details.pack(fill=tk.BOTH, expand=True)
+
+label_image = tk.Label(frame_droite)
+label_image.pack(pady=5)
+
+actualiser_liste()
+root.mainloop()
